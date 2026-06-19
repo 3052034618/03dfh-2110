@@ -3,26 +3,45 @@ const path = require('path');
 
 let mainWindow;
 
-function createWindow() {
+async function loadDevURL(win, url, retries = 20, delay = 1500) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await win.loadURL(url);
+      return true;
+    } catch (err) {
+      console.log(`等待开发服务器...（${i + 1}/${retries}）`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  return false;
+}
+
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
-    height: 800,
+    height: 820,
     minWidth: 1024,
     minHeight: 680,
     title: '剧本杀排位助手',
-    icon: path.join(__dirname, '../public/icon.png'),
+    backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
   const isDev = !app.isPackaged;
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5174');
-    mainWindow.webContents.openDevTools();
+    const devURL = 'http://localhost:5174';
+    const loaded = await loadDevURL(mainWindow, devURL);
+    if (loaded) {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    } else {
+      mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -81,6 +100,33 @@ const template = [
     ],
   },
   {
+    label: '工具',
+    submenu: [
+      {
+        label: '生成排位',
+        accelerator: 'Ctrl+G',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.webContents.executeJavaScript(
+              'document.querySelector("button[onclick*=\'generate\']")?.click()'
+            );
+          }
+        },
+      },
+      {
+        label: '生成主持单',
+        accelerator: 'Ctrl+H',
+        click: () => {
+          if (mainWindow) {
+            mainWindow.webContents.executeJavaScript(
+              'document.querySelector("button[onclick*=\'HostSheet\']")?.click()'
+            );
+          }
+        },
+      },
+    ],
+  },
+  {
     label: '帮助',
     submenu: [
       {
@@ -91,7 +137,8 @@ const template = [
             type: 'info',
             title: '关于',
             message: '剧本杀排位助手',
-            detail: '版本 1.0.0\n面向高校剧本杀社团主持人的排位工具',
+            detail:
+              '版本 1.0.0\n\n面向高校剧本杀社团主持人的排位工具\n\n功能：\n· 玩家名单管理\n· 角色要求配置\n· 智能匹配排位\n· 拖拽互换调整\n· 一键生成主持单',
           });
         },
       },

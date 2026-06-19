@@ -397,7 +397,7 @@ export default function SeatingResultPanel({
                       <span>👥</span>
                       <span>多出的玩家（共 {unassignedPlayers.length} 人）</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
                       {unassignedPlayers.map((p) => {
                         const bestFit = getBestFitForPlayer(p);
                         const levelLabel = bestFit
@@ -407,12 +407,18 @@ export default function SeatingResultPanel({
                             ? '可接受'
                             : '需确认'
                           : '';
+                        const currentPlayer = bestFit
+                          ? assignments.find((a) => a.characterId === bestFit.char.id)
+                          : undefined;
+                        const replacedPlayerName = currentPlayer
+                          ? players.find((pp) => pp.id === currentPlayer.playerId)?.name
+                          : undefined;
                         return (
                           <div
                             key={p.id}
-                            className="p-2 bg-white rounded border border-blue-100 text-sm"
+                            className="p-3 bg-white rounded border border-blue-100 text-sm"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 mb-1">
                               <span
                                 className={`w-2 h-2 rounded-full ${
                                   p.gender === 'male'
@@ -429,9 +435,21 @@ export default function SeatingResultPanel({
                                 </span>
                               )}
                             </div>
-                            {bestFit && (
-                              <div className="mt-1 text-xs text-blue-600">
-                                → 可补位「{bestFit.char.name}」（{levelLabel}）
+                            {bestFit ? (
+                              replacedPlayerName ? (
+                                <div className="text-xs text-blue-700">
+                                  → 可临时替下 <strong>{replacedPlayerName}</strong> 去顶
+                                  「{bestFit.char.name}」（{levelLabel}），
+                                  {replacedPlayerName}可休息或做NPC
+                                </div>
+                              ) : (
+                                <div className="text-xs text-blue-700">
+                                  → 可直接补位「{bestFit.char.name}」（{levelLabel}）
+                                </div>
+                              )
+                            ) : (
+                              <div className="text-xs text-gray-500">
+                                → 暂无适配的可替角色，建议OB或NPC
                               </div>
                             )}
                           </div>
@@ -439,7 +457,7 @@ export default function SeatingResultPanel({
                       })}
                     </div>
                     <div className="mt-2 text-xs text-blue-600">
-                      💡 建议：可以安排边缘位、OB位，或考虑加角色
+                      💡 也可考虑：加边缘角色、安排OB位、做场务NPC、等待轮换
                     </div>
                   </div>
                 )}
@@ -450,7 +468,7 @@ export default function SeatingResultPanel({
                       <span>🎭</span>
                       <span>空缺的角色（共 {unassignedCharacters.length} 个）</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
                       {unassignedCharacters.map((c) => {
                         const bestFit = getBestFitForCharacter(c);
                         const levelLabel = bestFit
@@ -460,19 +478,41 @@ export default function SeatingResultPanel({
                             ? '可接受'
                             : '需确认'
                           : '';
+                        const currentChar = bestFit
+                          ? assignments.find((a) => a.playerId === bestFit.player.id)
+                          : undefined;
+                        const currentCharName = currentChar
+                          ? characters.find((cc) => cc.id === currentChar.characterId)?.name
+                          : undefined;
+                        const isLight =
+                          characters.find((cc) => cc.id === currentChar?.characterId)
+                            ?.importance === 'light';
                         return (
                           <div
                             key={c.id}
-                            className="p-2 bg-white rounded border border-orange-100 text-sm"
+                            className="p-3 bg-white rounded border border-orange-100 text-sm"
                           >
-                            <div className="font-medium text-gray-800">{c.name}</div>
+                            <div className="font-medium text-gray-800 mb-1">{c.name}</div>
                             {bestFit ? (
-                              <div className="mt-1 text-xs text-orange-600">
-                                → 可由 {bestFit.player.name} 补位（{levelLabel}）
-                              </div>
+                              currentCharName ? (
+                                <div className="text-xs text-orange-700">
+                                  → 建议让 <strong>{bestFit.player.name}</strong> 双开
+                                  （现任「{currentCharName}」，{levelLabel}）
+                                  {isLight && (
+                                    <span className="block mt-1 text-orange-600">
+                                      备注：「{currentCharName}」戏份较轻，可临时NPC化让
+                                      {bestFit.player.name}专心
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-orange-700">
+                                  → 可由 <strong>{bestFit.player.name}</strong> 直接顶上（{levelLabel}）
+                                </div>
+                              )
                             ) : (
-                              <div className="mt-1 text-xs text-gray-500">
-                                → 暂无合适人选
+                              <div className="text-xs text-gray-500">
+                                → 暂无合适人选，建议直接NPC化由主持人代跑
                               </div>
                             )}
                           </div>
@@ -480,7 +520,7 @@ export default function SeatingResultPanel({
                       })}
                     </div>
                     <div className="mt-2 text-xs text-orange-600">
-                      💡 建议：可以安排双开、NPC化，或合并角色
+                      💡 也可考虑：由主持人NPC代跑、合并到其他角色、简化戏份
                     </div>
                   </div>
                 )}

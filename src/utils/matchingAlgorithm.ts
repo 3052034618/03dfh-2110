@@ -63,23 +63,30 @@ export function calculateMatch(player: Player, character: Character): MatchResul
   if (character.mustCrossdress) {
     const isCrossdressNeeded = player.gender !== character.gender;
 
-    if (!player.acceptCrossdress) {
-      reasons.push(`角色"${character.name}"必须反串，但玩家"${player.name}"不接受反串`);
-      hasHardConflict = true;
-    } else if (!isCrossdressNeeded) {
+    if (!isCrossdressNeeded) {
       reasons.push(`角色"${character.name}"必须反串，但玩家性别与角色性别相同，反串条件未满足`);
       hasConfirmIssue = true;
+
+      if (!player.acceptCrossdress) {
+        reasons.push(`角色"${character.name}"必须反串，且玩家"${player.name}"明确不接受反串`);
+        hasHardConflict = true;
+      }
     } else {
-      if (player.crossdressLevel === 'high') {
-        score += 40;
-        reasons.push(`必须反串角色，性别不同且玩家反串接受度高，非常合适`);
-      } else if (player.crossdressLevel === 'medium') {
-        score += 25;
-        reasons.push(`必须反串角色，性别不同且玩家反串接受度中等`);
-      } else if (player.crossdressLevel === 'low') {
-        score += 10;
-        reasons.push(`必须反串角色，性别不同但玩家反串接受度较低，需确认`);
-        hasConfirmIssue = true;
+      if (!player.acceptCrossdress) {
+        reasons.push(`角色"${character.name}"必须反串，但玩家"${player.name}"不接受反串`);
+        hasHardConflict = true;
+      } else {
+        if (player.crossdressLevel === 'high') {
+          score += 40;
+          reasons.push(`必须反串角色，性别不同且玩家反串接受度高，非常合适`);
+        } else if (player.crossdressLevel === 'medium') {
+          score += 25;
+          reasons.push(`必须反串角色，性别不同且玩家反串接受度中等`);
+        } else if (player.crossdressLevel === 'low') {
+          score += 10;
+          reasons.push(`必须反串角色，性别不同但玩家反串接受度较低，需确认`);
+          hasConfirmIssue = true;
+        }
       }
     }
   } else {
@@ -232,50 +239,93 @@ export function checkConflicts(
 interface SwapSuggestion {
   targetCharacterName: string;
   targetPlayerName: string;
-  suggestedPlayerName: string;
-  suggestedPlayerLevel: MatchLevel;
-  reasons: string[];
+  swapPlayerName: string;
+  swapPlayerCurrentChar: string;
+  targetAfterSwapLevel: MatchLevel;
+  swapAfterSwapLevel: MatchLevel;
+  targetReasons: string[];
+  swapReasons: string[];
 }
 
 export function generateSwapSuggestions(
   players: Player[],
   characters: Character[],
-  _assignments: { playerId: string; characterId: string }[],
+  assignments: { playerId: string; characterId: string }[],
   results: MatchResult[]
 ): SwapSuggestion[] {
   const suggestions: SwapSuggestion[] = [];
+  const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
 
   const confirmResults = results.filter((r) => r.level === 'confirm');
+  const processedPairs = new Set<string>();
 
   for (const confirmResult of confirmResults) {
-    const currentPlayer = players.find((p) => p.id === confirmResult.playerId);
+    const targetPlayer = players.find((p) => p.id === confirmResult.playerId);
     const targetChar = characters.find((c) => c.id === confirmResult.characterId);
-    if (!currentPlayer || !targetChar) continue;
+    if (!targetPlayer || !targetChar) continue;
 
-    const candidates: { player: Player; match: MatchResult }[] = [];
+    const candidates: {
+      swapPlayer: Player;
+      swapChar: Character;
+      targetMatch: MatchResult;
+      swapMatch: MatchResult;
+      score: number;
+    }[] = [];
 
-    for (const player of players) {
-      if (player.id === currentPlayer.id) continue;
+    for (const assignment of assignments) {
+      if (assignment.playerId === targetPlayer.id) continue;
 
-      const match = calculateMatch(player, targetChar);
-      if (match.level === 'strong' || match.level === 'acceptable') {
-        candidates.push({ player, match });
+      const pairKey = [targetPlayer.id, assignment.playerId].sort().join('-');
+      if (processedPairs.has(pairKey)) continue;
+
+      const swapPlayer = players.find((p) => p.id === assignment.playerId);
+      const swapChar = characters.find((c) => c.id === assignment.characterId);
+      if (!swapPlayer || !swapChar) continue;
+
+      const targetAfterMatch = calculateMatch(swapPlayer, targetChar);
+      const swapAfterMatch = calculateMatch(targetPlayer, swapChar);
+
+      const isBetter =
+        levelOrder[targetAfterMatch.level] < levelOrder[confirmResult.level];
+      const swapNotWorse =
+        levelOrder[swapAfterMatch.level] <=
+        levelOrder[
+          results.find(
+            (r) =>
+              r.playerId === assignment.playerId && r.characterId === assignment.characterId
+          )?.level || 'confirm'
+        ];
+
+      if (
+        (isBetter && swapNotWorse) ||
+        (targetAfterMatch.level !== 'confirm' && swapAfterMatch.level !== 'confirm')
+      ) {
+        const score =
+          levelOrder[targetAfterMatch.level] * 10 + levelOrder[swapAfterMatch.level];
+        candidates.push({
+          swapPlayer,
+          swapChar,
+          targetMatch: targetAfterMatch,
+          swapMatch: swapAfterMatch,
+          score,
+        });
       }
     }
 
-    candidates.sort((a, b) => {
-      const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
-      return levelOrder[a.match.level] - levelOrder[b.match.level];
-    });
+    candidates.sort((a, b) => a.score - b.score);
 
     if (candidates.length > 0) {
-      const topCandidate = candidates[0];
+      const top = candidates[0];
+      processedPairs.add([targetPlayer.id, top.swapPlayer.id].sort().join('-'));
       suggestions.push({
         targetCharacterName: targetChar.name,
-        targetPlayerName: currentPlayer.name,
-        suggestedPlayerName: topCandidate.player.name,
-        suggestedPlayerLevel: topCandidate.match.level,
-        reasons: topCandidate.match.reasons.slice(0, 3),
+        targetPlayerName: targetPlayer.name,
+        swapPlayerName: top.swapPlayer.name,
+        swapPlayerCurrentChar: top.swapChar.name,
+        targetAfterSwapLevel: top.targetMatch.level,
+        swapAfterSwapLevel: top.swapMatch.level,
+        targetReasons: top.targetMatch.reasons.slice(0, 2),
+        swapReasons: top.swapMatch.reasons.slice(0, 2),
       });
     }
   }
@@ -309,14 +359,21 @@ export function generateHostSheet(
 
   const swapSuggestions = generateSwapSuggestions(players, characters, assignments, results);
   if (swapSuggestions.length > 0) {
-    backupPlans.push('【可互换推荐】');
+    backupPlans.push('【可互换推荐】（放心换，换完两边都能看）');
+    const label = (l: MatchLevel) =>
+      l === 'strong' ? '强推荐' : l === 'acceptable' ? '可接受' : '需确认';
     swapSuggestions.forEach((s, i) => {
-      const levelLabel = s.suggestedPlayerLevel === 'strong' ? '强推荐' : '可接受';
       backupPlans.push(
-        `${i + 1}. "${s.targetCharacterName}"角色（当前：${s.targetPlayerName}）可考虑换为 ${s.suggestedPlayerName}（${levelLabel}）`
+        `${i + 1}. ${s.targetPlayerName}（${s.targetCharacterName}）↔ ${s.swapPlayerName}（${s.swapPlayerCurrentChar}）`
       );
-      if (s.reasons.length > 0) {
-        backupPlans.push(`   理由：${s.reasons.join('；')}`);
+      backupPlans.push(
+        `   换后：${s.targetCharacterName}→${s.swapPlayerName}（${label(s.targetAfterSwapLevel)}）；${s.swapPlayerCurrentChar}→${s.targetPlayerName}（${label(s.swapAfterSwapLevel)}）`
+      );
+      if (s.targetReasons.length > 0) {
+        backupPlans.push(`   ${s.swapPlayerName}拿${s.targetCharacterName}的理由：${s.targetReasons.join('；')}`);
+      }
+      if (s.swapReasons.length > 0) {
+        backupPlans.push(`   ${s.targetPlayerName}拿${s.swapPlayerCurrentChar}的理由：${s.swapReasons.join('；')}`);
       }
     });
   }
@@ -330,12 +387,18 @@ export function generateHostSheet(
 
   if (unassignedPlayers.length > 0) {
     backupPlans.push(`【多出的玩家（共${unassignedPlayers.length}人）】`);
+    const label = (l: MatchLevel) =>
+      l === 'strong' ? '强推荐' : l === 'acceptable' ? '可接受' : '需确认';
     unassignedPlayers.forEach((p) => {
-      const suitableChars: { char: Character; match: MatchResult }[] = [];
+      const suitableChars: { char: Character; match: MatchResult; currentPlayer?: Player }[] = [];
       characters.forEach((c) => {
         const match = calculateMatch(p, c);
         if (match.level === 'strong' || match.level === 'acceptable') {
-          suitableChars.push({ char: c, match });
+          const currentAssign = assignments.find((a) => a.characterId === c.id);
+          const currentPlayer = currentAssign
+            ? players.find((pp) => pp.id === currentAssign.playerId)
+            : undefined;
+          suitableChars.push({ char: c, match, currentPlayer });
         }
       });
 
@@ -344,34 +407,68 @@ export function generateHostSheet(
           const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
           return levelOrder[a.match.level] - levelOrder[b.match.level];
         })[0];
-        const levelLabel = top.match.level === 'strong' ? '强推荐' : '可接受';
-        backupPlans.push(`• ${p.name}：可补位"${top.char.name}"（${levelLabel}）`);
+        if (top.currentPlayer) {
+          backupPlans.push(
+            `• ${p.name}：建议临时替换 ${top.currentPlayer.name} 去顶"${top.char.name}"（${label(top.match.level)}），${top.currentPlayer.name}可先休息或做NPC`
+          );
+          backupPlans.push(`  理由：${top.match.reasons.slice(0, 2).join('；')}`);
+        } else {
+          backupPlans.push(`• ${p.name}：可直接补位"${top.char.name}"（${label(top.match.level)}）`);
+          backupPlans.push(`  理由：${top.match.reasons.slice(0, 2).join('；')}`);
+        }
       } else {
-        backupPlans.push(`• ${p.name}：暂无特别合适的角色，建议安排边缘位或OB位`);
+        backupPlans.push(
+          `• ${p.name}：暂无适配的可替角色，建议安排OB位、做场务NPC或等待轮换`
+        );
       }
     });
   }
 
   if (unassignedChars.length > 0) {
     backupPlans.push(`【空缺的角色（共${unassignedChars.length}个）】`);
+    const label = (l: MatchLevel) =>
+      l === 'strong' ? '强推荐' : l === 'acceptable' ? '可接受' : '需确认';
     unassignedChars.forEach((c) => {
-      const suitablePlayers: { player: Player; match: MatchResult }[] = [];
+      const suitableOnBoard: { player: Player; match: MatchResult; currentChar?: Character }[] = [];
+      const suitableAll: { player: Player; match: MatchResult }[] = [];
+
       players.forEach((p) => {
         const match = calculateMatch(p, c);
         if (match.level === 'strong' || match.level === 'acceptable') {
-          suitablePlayers.push({ player: p, match });
+          suitableAll.push({ player: p, match });
+          const currentAssign = assignments.find((a) => a.playerId === p.id);
+          if (currentAssign) {
+            const currentChar = characters.find((cc) => cc.id === currentAssign.characterId);
+            suitableOnBoard.push({ player: p, match, currentChar });
+          }
         }
       });
 
-      if (suitablePlayers.length > 0) {
-        const top = suitablePlayers.sort((a, b) => {
+      if (suitableOnBoard.length > 0) {
+        const top = suitableOnBoard.sort((a, b) => {
           const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
           return levelOrder[a.match.level] - levelOrder[b.match.level];
         })[0];
-        const levelLabel = top.match.level === 'strong' ? '强推荐' : '可接受';
-        backupPlans.push(`• ${c.name}：可由 ${top.player.name} 补位（${levelLabel}）`);
+        backupPlans.push(
+          `• ${c.name}：建议让 ${top.player.name} 双开（现任"${top.currentChar?.name}"），评估${label(top.match.level)}`
+        );
+        backupPlans.push(`  理由：${top.match.reasons.slice(0, 2).join('；')}`);
+        if (top.currentChar?.importance === 'light') {
+          backupPlans.push(
+            `  备注："${top.currentChar?.name}"戏份较轻，可考虑临时NPC化让${top.player.name}专心演${c.name}`
+          );
+        }
+      } else if (suitableAll.length > 0) {
+        const top = suitableAll.sort((a, b) => {
+          const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
+          return levelOrder[a.match.level] - levelOrder[b.match.level];
+        })[0];
+        backupPlans.push(
+          `• ${c.name}：可由 ${top.player.name} 直接顶上（${label(top.match.level)}）`
+        );
+        backupPlans.push(`  理由：${top.match.reasons.slice(0, 2).join('；')}`);
       } else {
-        backupPlans.push(`• ${c.name}：暂无合适人选，建议NPC化或合并角色`);
+        backupPlans.push(`• ${c.name}：暂无合适人选，建议直接NPC化由主持人代跑，或合并到其他角色中`);
       }
     });
   }
