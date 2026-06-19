@@ -171,6 +171,38 @@ export default function SeatingResultPanel({
     });
   }, [characters, assignments, players, results]);
 
+  const unassignedPlayers = useMemo(() => {
+    return players.filter((p) => !assignments.some((a) => a.playerId === p.id));
+  }, [players, assignments]);
+
+  const unassignedCharacters = useMemo(() => {
+    return characters.filter((c) => !assignments.some((a) => a.characterId === c.id));
+  }, [characters, assignments]);
+
+  const getBestFitForPlayer = (player: Player) => {
+    let best: { char: Character; match: MatchResult } | null = null;
+    const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
+    for (const char of characters) {
+      const match = calculateMatch(player, char);
+      if (!best || levelOrder[match.level] < levelOrder[best.match.level]) {
+        best = { char, match };
+      }
+    }
+    return best;
+  };
+
+  const getBestFitForCharacter = (character: Character) => {
+    let best: { player: Player; match: MatchResult } | null = null;
+    const levelOrder: Record<MatchLevel, number> = { strong: 0, acceptable: 1, confirm: 2 };
+    for (const player of players) {
+      const match = calculateMatch(player, character);
+      if (!best || levelOrder[match.level] < levelOrder[best.match.level]) {
+        best = { player, match };
+      }
+    }
+    return best;
+  };
+
   const activeSeat = useMemo(() => {
     if (!activeId) return null;
     return seatData.find((s) => s.characterId === activeId);
@@ -356,6 +388,104 @@ export default function SeatingResultPanel({
             <div className="mt-4 text-center text-xs text-gray-400">
               💡 提示：拖动角色卡片可以互换玩家位置
             </div>
+
+            {(unassignedPlayers.length > 0 || unassignedCharacters.length > 0) && (
+              <div className="mt-6 space-y-4">
+                {unassignedPlayers.length > 0 && (
+                  <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="text-sm font-medium text-blue-800 mb-3 flex items-center gap-2">
+                      <span>👥</span>
+                      <span>多出的玩家（共 {unassignedPlayers.length} 人）</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {unassignedPlayers.map((p) => {
+                        const bestFit = getBestFitForPlayer(p);
+                        const levelLabel = bestFit
+                          ? bestFit.match.level === 'strong'
+                            ? '强推荐'
+                            : bestFit.match.level === 'acceptable'
+                            ? '可接受'
+                            : '需确认'
+                          : '';
+                        return (
+                          <div
+                            key={p.id}
+                            className="p-2 bg-white rounded border border-blue-100 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  p.gender === 'male'
+                                    ? 'bg-blue-500'
+                                    : p.gender === 'female'
+                                    ? 'bg-pink-500'
+                                    : 'bg-purple-500'
+                                }`}
+                              />
+                              <span className="font-medium text-gray-800">{p.name}</span>
+                              {p.isNewbie && (
+                                <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded">
+                                  新人
+                                </span>
+                              )}
+                            </div>
+                            {bestFit && (
+                              <div className="mt-1 text-xs text-blue-600">
+                                → 可补位「{bestFit.char.name}」（{levelLabel}）
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 text-xs text-blue-600">
+                      💡 建议：可以安排边缘位、OB位，或考虑加角色
+                    </div>
+                  </div>
+                )}
+
+                {unassignedCharacters.length > 0 && (
+                  <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                    <div className="text-sm font-medium text-orange-800 mb-3 flex items-center gap-2">
+                      <span>🎭</span>
+                      <span>空缺的角色（共 {unassignedCharacters.length} 个）</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {unassignedCharacters.map((c) => {
+                        const bestFit = getBestFitForCharacter(c);
+                        const levelLabel = bestFit
+                          ? bestFit.match.level === 'strong'
+                            ? '强推荐'
+                            : bestFit.match.level === 'acceptable'
+                            ? '可接受'
+                            : '需确认'
+                          : '';
+                        return (
+                          <div
+                            key={c.id}
+                            className="p-2 bg-white rounded border border-orange-100 text-sm"
+                          >
+                            <div className="font-medium text-gray-800">{c.name}</div>
+                            {bestFit ? (
+                              <div className="mt-1 text-xs text-orange-600">
+                                → 可由 {bestFit.player.name} 补位（{levelLabel}）
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-xs text-gray-500">
+                                → 暂无合适人选
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 text-xs text-orange-600">
+                      💡 建议：可以安排双开、NPC化，或合并角色
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
